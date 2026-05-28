@@ -1024,17 +1024,18 @@ app.get('/api/admin/course-categories', verifyAdminToken, asyncHandler(async (_r
   res.json({ success: true, categories: categories.map((c) => publicCourseCategory(c, { hasAccess: true }, countMap.get(String(c._id)) || 0)) });
 }));
 
-app.post('/api/admin/course-categories', verifyAdminToken, asyncHandler(async (req, res) => {
+app.post('/api/admin/course-categories', verifyAdminToken, upload.single('coverImage'), asyncHandler(async (req, res) => {
   const title = String(req.body.title || '').trim();
   if (!title) return res.status(400).json({ success: false, message: 'Turkum nomini kiriting.' });
+  const uploadedCover = req.file ? await saveUploadedImage(req.file, 'course-covers') : null;
   const slug = await uniqueCourseSlug(req.body.slug || title);
   const category = await CourseCategory.create({
     title,
     slug,
     description: String(req.body.description || '').trim(),
-    icon: String(req.body.icon || '🎓').trim() || '🎓',
-    accent: String(req.body.accent || '#7c3aed').trim(),
-    coverUrl: String(req.body.coverUrl || '').trim(),
+    icon: String(req.body.icon || 'code').trim() || 'code',
+    accent: String(req.body.accent || '#238cff').trim(),
+    coverUrl: uploadedCover?.url || String(req.body.coverUrl || '').trim(),
     price: normalizeNumber(req.body.price),
     oldPrice: normalizeNumber(req.body.oldPrice),
     level: String(req.body.level || '').trim(),
@@ -1046,10 +1047,12 @@ app.post('/api/admin/course-categories', verifyAdminToken, asyncHandler(async (r
   res.status(201).json({ success: true, category });
 }));
 
-app.patch('/api/admin/course-categories/:id', verifyAdminToken, asyncHandler(async (req, res) => {
+app.patch('/api/admin/course-categories/:id', verifyAdminToken, upload.single('coverImage'), asyncHandler(async (req, res) => {
   ensureObjectId(req.params.id, 'Turkum ID');
   const update = {};
   for (const f of ['title', 'description', 'icon', 'accent', 'coverUrl', 'level', 'duration']) if (req.body[f] !== undefined) update[f] = String(req.body[f] || '').trim();
+  const uploadedCover = req.file ? await saveUploadedImage(req.file, 'course-covers') : null;
+  if (uploadedCover?.url) update.coverUrl = uploadedCover.url;
   for (const f of ['price', 'oldPrice', 'sort']) if (req.body[f] !== undefined) update[f] = normalizeNumber(req.body[f]);
   for (const f of ['active', 'featured']) if (req.body[f] !== undefined) update[f] = parseBoolean(req.body[f], true);
   if (req.body.slug !== undefined || req.body.title !== undefined) update.slug = await uniqueCourseSlug(req.body.slug || req.body.title || 'course', req.params.id);
@@ -1073,7 +1076,7 @@ app.get('/api/admin/course-lessons', verifyAdminToken, asyncHandler(async (req, 
   res.json({ success: true, lessons: lessons.map((l) => ({ ...publicLesson(l, true), categoryTitle: l.categoryId?.title || '' })) });
 }));
 
-app.post('/api/admin/course-lessons', verifyAdminToken, asyncHandler(async (req, res) => {
+app.post('/api/admin/course-lessons', verifyAdminToken, upload.single('thumbnailImage'), asyncHandler(async (req, res) => {
   ensureObjectId(req.body.categoryId, 'Turkum ID');
   const category = await CourseCategory.findById(req.body.categoryId);
   if (!category) return res.status(404).json({ success: false, message: 'Turkum topilmadi.' });
@@ -1082,13 +1085,14 @@ app.post('/api/admin/course-lessons', verifyAdminToken, asyncHandler(async (req,
   const youtubeUrl = String(req.body.youtubeUrl || '').trim();
   const youtubeId = extractYoutubeId(youtubeUrl);
   if (youtubeUrl && !youtubeId) return res.status(400).json({ success: false, message: 'YouTube havola noto‘g‘ri. watch, youtu.be, shorts, live yoki embed link kiriting.' });
+  const uploadedThumb = req.file ? await saveUploadedImage(req.file, 'lesson-thumbnails') : null;
   const lesson = await Lesson.create({
     categoryId: category._id,
     title,
     description: String(req.body.description || '').trim(),
     youtubeUrl,
     youtubeId,
-    thumbnailUrl: String(req.body.thumbnailUrl || '').trim() || youtubeThumbUrl(youtubeId),
+    thumbnailUrl: uploadedThumb?.url || String(req.body.thumbnailUrl || '').trim() || youtubeThumbUrl(youtubeId),
     duration: String(req.body.duration || '').trim(),
     order: normalizeNumber(req.body.order || 100),
     premium: parseBoolean(req.body.premium, true),
@@ -1099,7 +1103,7 @@ app.post('/api/admin/course-lessons', verifyAdminToken, asyncHandler(async (req,
   res.status(201).json({ success: true, lesson });
 }));
 
-app.patch('/api/admin/course-lessons/:id', verifyAdminToken, asyncHandler(async (req, res) => {
+app.patch('/api/admin/course-lessons/:id', verifyAdminToken, upload.single('thumbnailImage'), asyncHandler(async (req, res) => {
   ensureObjectId(req.params.id, 'Dars ID');
   const update = {};
   if (req.body.categoryId !== undefined) { ensureObjectId(req.body.categoryId, 'Turkum ID'); update.categoryId = req.body.categoryId; }
@@ -1109,6 +1113,8 @@ app.patch('/api/admin/course-lessons/:id', verifyAdminToken, asyncHandler(async 
     if (update.youtubeUrl && !update.youtubeId) return res.status(400).json({ success: false, message: 'YouTube havola noto‘g‘ri. watch, youtu.be, shorts, live yoki embed link kiriting.' });
     if (!update.thumbnailUrl) update.thumbnailUrl = youtubeThumbUrl(update.youtubeId);
   }
+  const uploadedThumb = req.file ? await saveUploadedImage(req.file, 'lesson-thumbnails') : null;
+  if (uploadedThumb?.url) update.thumbnailUrl = uploadedThumb.url;
   for (const f of ['order']) if (req.body[f] !== undefined) update[f] = normalizeNumber(req.body[f]);
   for (const f of ['premium', 'active']) if (req.body[f] !== undefined) update[f] = parseBoolean(req.body[f], true);
   for (const f of ['resources', 'tags']) if (req.body[f] !== undefined) update[f] = listFromAny(req.body[f]);
