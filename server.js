@@ -787,21 +787,45 @@ function slugify(value) {
 function extractYoutubeId(url) {
   const raw = String(url || '').trim();
   if (!raw) return '';
+  const cleanId = (value) => {
+    const id = String(value || '').trim().replace(/[^A-Za-z0-9_-].*$/, '');
+    return /^[A-Za-z0-9_-]{6,}$/.test(id) ? id : '';
+  };
+  const direct = cleanId(raw);
+  if (direct) return direct;
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.replace(/^www\./, '').replace(/^m\./, '').toLowerCase();
+    if (host === 'youtu.be') return cleanId(parsed.pathname.split('/').filter(Boolean)[0]);
+    if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
+      const fromQuery = cleanId(parsed.searchParams.get('v'));
+      if (fromQuery) return fromQuery;
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const keys = ['embed', 'shorts', 'live', 'v', 'e'];
+      for (const key of keys) {
+        const idx = parts.indexOf(key);
+        if (idx !== -1 && parts[idx + 1]) return cleanId(parts[idx + 1]);
+      }
+    }
+  } catch { /* odd URL formats are handled by regex below */ }
   const patterns = [
     /youtu\.be\/([A-Za-z0-9_-]{6,})/i,
-    /youtube\.com\/watch\?[^#]*v=([A-Za-z0-9_-]{6,})/i,
-    /youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/i,
-    /youtube\.com\/shorts\/([A-Za-z0-9_-]{6,})/i,
-    /youtube\.com\/live\/([A-Za-z0-9_-]{6,})/i,
+    /[?&]v=([A-Za-z0-9_-]{6,})/i,
+    /youtube(?:-nocookie)?\.com\/(?:embed|shorts|live|v|e)\/([A-Za-z0-9_-]{6,})/i,
   ];
   for (const pattern of patterns) {
     const match = raw.match(pattern);
-    if (match?.[1]) return match[1];
+    if (match?.[1]) return cleanId(match[1]);
   }
-  if (/^[A-Za-z0-9_-]{6,}$/.test(raw)) return raw;
   return '';
 }
-function youtubeEmbedUrl(id) { return id ? `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1` : ''; }
+function youtubeEmbedUrl(id) {
+  if (!id) return '';
+  const params = new URLSearchParams({ rel: '0', modestbranding: '1', playsinline: '1', enablejsapi: '1' });
+  const origin = PUBLIC_URL || WEBAPP_URL || '';
+  if (origin) params.set('origin', origin);
+  return `https://www.youtube.com/embed/${encodeURIComponent(id)}?${params.toString()}`;
+}
 function youtubeThumbUrl(id) { return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : ''; }
 async function uniqueCourseSlug(value, exceptId = '') {
   const base = slugify(value);
@@ -852,7 +876,8 @@ function publicCourseCategory(cat, access = null, lessonCount = 0) {
   };
 }
 function publicLesson(lesson, hasAccess = false) {
-  const youtubeId = hasAccess ? (lesson.youtubeId || extractYoutubeId(lesson.youtubeUrl)) : '';
+  const resolvedYoutubeId = lesson.youtubeId || extractYoutubeId(lesson.youtubeUrl);
+  const youtubeId = hasAccess ? resolvedYoutubeId : '';
   return {
     _id: lesson._id,
     categoryId: lesson.categoryId?._id || lesson.categoryId,
@@ -862,7 +887,7 @@ function publicLesson(lesson, hasAccess = false) {
     order: lesson.order || 100,
     premium: lesson.premium !== false,
     active: lesson.active !== false,
-    thumbnailUrl: lesson.thumbnailUrl || (lesson.youtubeId ? youtubeThumbUrl(lesson.youtubeId) : ''),
+    thumbnailUrl: lesson.thumbnailUrl || (resolvedYoutubeId ? youtubeThumbUrl(resolvedYoutubeId) : ''),
     tags: lesson.tags || [],
     resources: hasAccess ? (lesson.resources || []) : [],
     isLocked: !hasAccess && lesson.premium !== false,
@@ -1056,6 +1081,7 @@ app.post('/api/admin/course-lessons', verifyAdminToken, asyncHandler(async (req,
   if (!title) return res.status(400).json({ success: false, message: 'Dars nomini kiriting.' });
   const youtubeUrl = String(req.body.youtubeUrl || '').trim();
   const youtubeId = extractYoutubeId(youtubeUrl);
+  if (youtubeUrl && !youtubeId) return res.status(400).json({ success: false, message: 'YouTube havola noto‘g‘ri. watch, youtu.be, shorts, live yoki embed link kiriting.' });
   const lesson = await Lesson.create({
     categoryId: category._id,
     title,
@@ -1080,6 +1106,7 @@ app.patch('/api/admin/course-lessons/:id', verifyAdminToken, asyncHandler(async 
   for (const f of ['title', 'description', 'youtubeUrl', 'thumbnailUrl', 'duration']) if (req.body[f] !== undefined) update[f] = String(req.body[f] || '').trim();
   if (req.body.youtubeUrl !== undefined) {
     update.youtubeId = extractYoutubeId(req.body.youtubeUrl);
+    if (update.youtubeUrl && !update.youtubeId) return res.status(400).json({ success: false, message: 'YouTube havola noto‘g‘ri. watch, youtu.be, shorts, live yoki embed link kiriting.' });
     if (!update.thumbnailUrl) update.thumbnailUrl = youtubeThumbUrl(update.youtubeId);
   }
   for (const f of ['order']) if (req.body[f] !== undefined) update[f] = normalizeNumber(req.body[f]);
